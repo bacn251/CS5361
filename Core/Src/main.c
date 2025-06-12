@@ -22,12 +22,14 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "Audio.h"
-#include "cs43l22.h"
 #include <math.h>
 #include "usb_device.h"
 #include "CS5361.h"
 #include "usbd_cdc.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -61,7 +63,28 @@ uint8_t buffer_ready = 1;
 
 volatile uint16_t Mic_DMA_PDM_Buffer0[INTERNAL_BUFF_SIZE];
 volatile uint16_t Mic_DMA_PDM_Buffer1[INTERNAL_BUFF_SIZE];
+// pack buffer
+#define FIFO_SIZE 8192
+#define USB_BUFFER_SIZE 2048
+uint32_t fifobuf[FIFO_SIZE];
+volatile uint16_t fifo_w_ptr = 0;
+volatile uint16_t fifo_r_ptr = 0;
+uint8_t fifo_read_enabled = 0;
+static uint32_t fifo_overflow_count = 0;
+uint8_t usbTxBuffer[USB_BUFFER_SIZE];
+volatile uint8_t usbTxReady = 1;
 
+#define PACKET_START_MARKER1 0xAA
+#define PACKET_START_MARKER2 0x55
+#define PACKET_HEADER_SIZE 4 // 2 start markers + 2 bytes length
+#define AUDIO_BUFFER_SIZE       1024    // sample
+#define AUDIO_CHANNELS          2       //left and right (2), left or right (1)
+#define SAMPLE_RATE            48000    // 48kHz sampling rate
+uint16_t audio_buffer[AUDIO_BUFFER_SIZE * AUDIO_CHANNELS * 2]; // x2 vì 24-bit = 2 x uint16_t
+uint16_t audio_buffer_ping[AUDIO_BUFFER_SIZE * 2];
+uint16_t audio_buffer_pong[AUDIO_BUFFER_SIZE * 2];
+volatile uint8_t buffer_ready_flag = 0;
+volatile uint8_t current_buffer = 0; // 0 = ping, 1 = pong
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -77,6 +100,113 @@ static void MX_I2S3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void FifoWrite(uint32_t data)
+{
+  uint16_t next = (fifo_w_ptr + 1) % FIFO_SIZE;
+
+  if (next == fifo_r_ptr)
+  {
+    // FIFO full - advance read pointer to drop oldest data
+    fifo_r_ptr = (fifo_r_ptr + 1) % FIFO_SIZE;
+    fifo_overflow_count++;
+
+    if (fifo_overflow_count % 100 == 0)
+    {
+      HAL_GPIO_TogglePin(LD6_GPIO_Port, LD6_Pin);
+    }
+  }
+
+  // Always write new data
+  fifobuf[fifo_w_ptr] = data & 0xFFFFFF;
+  fifo_w_ptr = next;
+}
+uint32_t FifoRead(void)
+{
+  if (fifo_r_ptr != fifo_w_ptr)
+  {
+    uint32_t val = fifobuf[fifo_r_ptr];
+    fifo_r_ptr = (fifo_r_ptr + 1) % FIFO_SIZE;
+    return val;
+  }
+  return 0;
+}
+
+uint16_t FifoAvailable(void)
+{
+  return (fifo_w_ptr - fifo_r_ptr + FIFO_SIZE) % FIFO_SIZE;
+}
+void SendAD7175DataOverUSB(void)
+{
+  uint16_t available = FifoAvailable();
+  if (usbTxReady && available >= 96)
+  {
+    uint16_t count = available > 96 ? 96 : available;
+    uint16_t total_size = count * 3 + PACKET_HEADER_SIZE;
+
+    // Add packet header
+    usbTxBuffer[0] = PACKET_START_MARKER1;
+    usbTxBuffer[1] = PACKET_START_MARKER2;
+    usbTxBuffer[2] = (count >> 8) & 0xFF;
+    usbTxBuffer[3] = count & 0xFF;
+
+    for (uint32_t i = 0; i < count; i++)
+    {
+      uint32_t data = FifoRead();
+      uint32_t offset = PACKET_HEADER_SIZE + (i * 3);
+      usbTxBuffer[offset] = data & 0xFF;
+      usbTxBuffer[offset + 1] = (data >> 8) & 0xFF;
+      usbTxBuffer[offset + 2] = (data >> 16) & 0xFF;
+    }
+
+    usbTxReady = 0;
+    uint8_t result = CDC_Transmit_FS(usbTxBuffer, total_size);
+    if (result == USBD_OK)
+    {
+      HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
+      HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, 0);
+    }
+    else
+    {
+      usbTxReady = 1;
+      HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, 1);
+    }
+  }
+}
+void CheckUSBStatus(void)
+{
+  static uint32_t last_check_time = 0;
+  static uint32_t stuck_time = 0;
+
+  uint32_t current_time = HAL_GetTick();
+  if (current_time - last_check_time < 100)
+    return;
+
+  last_check_time = current_time;
+  if (!usbTxReady)
+  {
+    if (stuck_time == 0)
+    {
+      stuck_time = current_time;
+    }
+    else if (current_time - stuck_time > 500)
+    {
+      usbTxReady = 1;
+      stuck_time = 0;
+      for (int i = 0; i < 3; i++)
+      {
+        HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
+        HAL_Delay(20);
+        HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET);
+        HAL_Delay(20);
+      }
+    }
+  }
+  else
+  {
+    stuck_time = 0;
+  }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -113,7 +243,23 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_I2S3_Init();
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET); // �?èn xanh
+  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET); // �?èn xanh lá
+  HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET); // �?èn đ�?
+  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET); // �?èn màu xanh dương
+
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+  HAL_Delay(200);
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
+  HAL_Delay(200);
+  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET);
   cs5361_init();
+  HAL_Delay(50);
+  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
+  HAL_Delay(200);
+  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
+  HAL_I2S_Receive_DMA(&hi2s3, audio_buffer, AUDIO_BUFFER_SIZE*AUDIO_CHANNELS*2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -351,24 +497,46 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+//void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
+//{
+//  /* Call CS5361 transfer complete callback */
+//  if (hi2s->Instance == SPI3)
+//  {
+//    cs5361_transfer_complete_callback();
+//  }
+//}
 void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-  /* Call CS5361 half transfer complete callback */
-  if (hi2s->Instance == SPI3)
-  {
-    cs5361_half_transfer_complete_callback();
-  }
+    /* First half of buffer is ready (ping buffer) */
+    memcpy(audio_buffer_ping, audio_buffer, AUDIO_BUFFER_SIZE * 2 * sizeof(uint16_t));
+    current_buffer = 0;
+    buffer_ready_flag = 1;
 }
-
 void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-  /* Call CS5361 transfer complete callback */
-  if (hi2s->Instance == SPI3)
-  {
-    cs5361_transfer_complete_callback();
-  }
+    /* Second half of buffer is ready (pong buffer) */
+    memcpy(audio_buffer_pong, &audio_buffer[AUDIO_BUFFER_SIZE * 2],
+           AUDIO_BUFFER_SIZE * 2 * sizeof(uint16_t));
+    current_buffer = 1;
+    buffer_ready_flag = 1;
 }
+void Process_Audio_Data(uint16_t* buffer, uint16_t size)
+{
+ // FOR MAT LEFT RIGHT
+	 for(uint16_t i = 0; i < size; i += 4)
+	 {
+	      uint16_t left_high= buffer[i];      // Lower 16 bits
+	      uint16_t left_low = buffer[i + 1]; // Upper 8 bits (+ 8 padding bits)
+	      uint16_t right_high = buffer[i + 2];  // Lower 16 bits
+	      uint16_t right_low = buffer[i + 3]; // Upper 8 bits (+ 8 padding bits)
+	      int32_t left_24bit = ((int32_t)left_high << 16) | left_low;
+	      int32_t right_24bit = ((int32_t)right_high << 16) | right_low;
+	      left_24bit = left_24bit >> 8;
+	      right_24bit = right_24bit >> 8;
 
+
+	 }
+}
 /* USER CODE END 4 */
 
 /**

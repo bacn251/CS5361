@@ -22,7 +22,7 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
-
+extern volatile uint8_t usbTxReady;
 /* USER CODE END INCLUDE */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -311,6 +311,8 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum)
   UNUSED(Buf);
   UNUSED(Len);
   UNUSED(epnum);
+  usbTxReady = 1;
+  HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
   /* USER CODE END 13 */
   return result;
 }

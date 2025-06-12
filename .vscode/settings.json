@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "Makefile": "c",
+        "usb_device.h": "c"
+    }
+}
