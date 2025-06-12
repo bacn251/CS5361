@@ -76,10 +76,10 @@ volatile uint8_t usbTxReady = 1;
 
 #define PACKET_START_MARKER1 0xAA
 #define PACKET_START_MARKER2 0x55
-#define PACKET_HEADER_SIZE 4 // 2 start markers + 2 bytes length
-#define AUDIO_BUFFER_SIZE       1024    // sample
-#define AUDIO_CHANNELS          2       //left and right (2), left or right (1)
-#define SAMPLE_RATE            48000    // 48kHz sampling rate
+#define PACKET_HEADER_SIZE 4                                   // 2 start markers + 2 bytes length
+#define AUDIO_BUFFER_SIZE 256                                  // sample
+#define AUDIO_CHANNELS 2                                       // left and right (2), left or right (1)
+#define SAMPLE_RATE 48000                                      // 48kHz sampling rate
 uint16_t audio_buffer[AUDIO_BUFFER_SIZE * AUDIO_CHANNELS * 2]; // x2 vì 24-bit = 2 x uint16_t
 uint16_t audio_buffer_ping[AUDIO_BUFFER_SIZE * 2];
 uint16_t audio_buffer_pong[AUDIO_BUFFER_SIZE * 2];
@@ -100,6 +100,7 @@ static void MX_I2S3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void Process_Audio_Data(uint16_t *buffer, uint16_t size);
 void FifoWrite(uint32_t data)
 {
   uint16_t next = (fifo_w_ptr + 1) % FIFO_SIZE;
@@ -138,9 +139,9 @@ uint16_t FifoAvailable(void)
 void SendAD7175DataOverUSB(void)
 {
   uint16_t available = FifoAvailable();
-  if (usbTxReady && available >= 96)
+  if (usbTxReady && available >= 192)
   {
-    uint16_t count = available > 96 ? 96 : available;
+    uint16_t count = available > 192 ? 192 : available;
     uint16_t total_size = count * 3 + PACKET_HEADER_SIZE;
 
     // Add packet header
@@ -160,16 +161,16 @@ void SendAD7175DataOverUSB(void)
 
     usbTxReady = 0;
     uint8_t result = CDC_Transmit_FS(usbTxBuffer, total_size);
-    if (result == USBD_OK)
-    {
-      HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
-      HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, 0);
-    }
-    else
-    {
-      usbTxReady = 1;
-      HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, 1);
-    }
+    // if (result == USBD_OK)
+    // {
+    //   HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
+    //   HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, 0);
+    // }
+    // else
+    // {
+    //   usbTxReady = 1;
+    //   HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, 1);
+    // }
   }
 }
 void CheckUSBStatus(void)
@@ -243,10 +244,10 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_I2S3_Init();
   /* USER CODE BEGIN 2 */
-  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET); // �?èn xanh
-  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET); // �?èn xanh lá
-  HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET); // �?èn đ�?
-  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET); // �?èn màu xanh dương
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET); // èn xanh
+  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET); // èn xanh lá
+  HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET); // èn đ
+  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET); // èn màu xanh dương
 
   HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
   HAL_Delay(200);
@@ -259,7 +260,7 @@ int main(void)
   HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
   HAL_Delay(200);
   HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
-  HAL_I2S_Receive_DMA(&hi2s3, audio_buffer, AUDIO_BUFFER_SIZE*AUDIO_CHANNELS*2);
+  HAL_I2S_Receive_DMA(&hi2s3, audio_buffer, AUDIO_BUFFER_SIZE * AUDIO_CHANNELS * 2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -269,6 +270,25 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    if (buffer_ready_flag)
+    {
+      buffer_ready_flag = 0;
+
+      // Process the appropriate buffer based on current_buffer flag
+      if (current_buffer == 0)
+      {
+        // Process ping buffer
+        Process_Audio_Data(audio_buffer_ping, AUDIO_BUFFER_SIZE);
+      }
+      else
+      {
+        // Process pong buffer
+        Process_Audio_Data(audio_buffer_pong, AUDIO_BUFFER_SIZE);
+      }
+    }
+
+    // Chỉ check trạng thái USB, không g�?i SendAD7175DataOverUSB nữa
+    // CheckUSBStatus();
   }
   /* USER CODE END 3 */
 }
@@ -294,10 +314,10 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 72;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 336;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 3;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -312,7 +332,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
   {
     Error_Handler();
   }
@@ -397,9 +417,9 @@ static void MX_TIM4_Init(void)
 
   /* USER CODE END TIM4_Init 1 */
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 83;
+  htim4.Init.Prescaler = 6;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 1999;
+  htim4.Init.Period = 249;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
@@ -497,45 +517,93 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-//void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
+// void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
 //{
-//  /* Call CS5361 transfer complete callback */
-//  if (hi2s->Instance == SPI3)
-//  {
-//    cs5361_transfer_complete_callback();
-//  }
-//}
+//   /* Call CS5361 transfer complete callback */
+//   if (hi2s->Instance == SPI3)
+//   {
+//     cs5361_transfer_complete_callback();
+//   }
+// }
 void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-    /* First half of buffer is ready (ping buffer) */
-    memcpy(audio_buffer_ping, audio_buffer, AUDIO_BUFFER_SIZE * 2 * sizeof(uint16_t));
-    current_buffer = 0;
-    buffer_ready_flag = 1;
+  /* First half of buffer is ready (ping buffer) */
+  memcpy(audio_buffer_ping, audio_buffer, AUDIO_BUFFER_SIZE * 2 * sizeof(uint16_t));
+  current_buffer = 0;
+  buffer_ready_flag = 1;
+
+  ////
+  uint16_t left_index = 0;
+  for (uint16_t i = 0; i < AUDIO_BUFFER_SIZE * 2; i += 4)
+  {
+    audio_buffer_ping[left_index++] = audio_buffer[i];     // Left low
+    audio_buffer_ping[left_index++] = audio_buffer[i + 1]; // Left high
+  }
+  current_buffer = 0;
+  buffer_ready_flag = 1;
 }
 void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-    /* Second half of buffer is ready (pong buffer) */
-    memcpy(audio_buffer_pong, &audio_buffer[AUDIO_BUFFER_SIZE * 2],
-           AUDIO_BUFFER_SIZE * 2 * sizeof(uint16_t));
-    current_buffer = 1;
-    buffer_ready_flag = 1;
+  /* Second half of buffer is ready (pong buffer) */
+  // memcpy(audio_buffer_pong, &audio_buffer[AUDIO_BUFFER_SIZE * 2],
+  //        AUDIO_BUFFER_SIZE * 2 * sizeof(uint16_t));
+  // current_buffer = 1;
+  // buffer_ready_flag = 1;
+  uint16_t left_index = 0;
+  uint16_t start_offset = AUDIO_BUFFER_SIZE * 2;
+  for (uint16_t i = start_offset; i < start_offset + AUDIO_BUFFER_SIZE * 2; i += 4)
+  {
+    audio_buffer_pong[left_index++] = audio_buffer[i];     // Left low
+    audio_buffer_pong[left_index++] = audio_buffer[i + 1]; // Left high
+  }
+  current_buffer = 1;
+  buffer_ready_flag = 1;
 }
-void Process_Audio_Data(uint16_t* buffer, uint16_t size)
+void Process_Audio_Data(uint16_t *buffer, uint16_t size)
 {
- // FOR MAT LEFT RIGHT
-	 for(uint16_t i = 0; i < size; i += 4)
-	 {
-	      uint16_t left_high= buffer[i];      // Lower 16 bits
-	      uint16_t left_low = buffer[i + 1]; // Upper 8 bits (+ 8 padding bits)
-	      uint16_t right_high = buffer[i + 2];  // Lower 16 bits
-	      uint16_t right_low = buffer[i + 3]; // Upper 8 bits (+ 8 padding bits)
-	      int32_t left_24bit = ((int32_t)left_high << 16) | left_low;
-	      int32_t right_24bit = ((int32_t)right_high << 16) | right_low;
-	      left_24bit = left_24bit >> 8;
-	      right_24bit = right_24bit >> 8;
+  if (usbTxReady)
+  {
+    // Giới hạn kích thước gói tin để truy�?n hiệu quả
+    uint16_t sample_count = size > 192 ? 192 : size;
+    uint16_t total_size = sample_count * 3 + PACKET_HEADER_SIZE;
 
+    // Thêm header gói tin
+    usbTxBuffer[0] = PACKET_START_MARKER1;
+    usbTxBuffer[1] = PACKET_START_MARKER2;
+    usbTxBuffer[2] = (sample_count >> 8) & 0xFF;
+    usbTxBuffer[3] = sample_count & 0xFF;
 
-	 }
+    // Xử lý trực tiếp dữ liệu kênh trái và đưa vào buffer USB
+    for (uint16_t i = 0, offset_idx = 0; i < sample_count; i += 2, offset_idx++)
+    {
+      uint16_t left_high = buffer[i];
+      uint16_t left_low = buffer[i + 1];
+
+      // Chuyển sang định dạng 24-bit
+      int32_t left_24bit = ((int32_t)left_high << 16) | left_low;
+      left_24bit = (left_24bit << 8) >> 8; // Sign extend
+
+      // �?ặt dữ liệu vào buffer truy�?n
+      uint32_t offset = PACKET_HEADER_SIZE + (offset_idx * 3);
+      usbTxBuffer[offset] = left_24bit & 0xFF;
+      usbTxBuffer[offset + 1] = (left_24bit >> 8) & 0xFF;
+      usbTxBuffer[offset + 2] = (left_24bit >> 16) & 0xFF;
+    }
+
+    // Gửi dữ liệu qua USB
+    usbTxReady = 0;
+    uint8_t result = CDC_Transmit_FS(usbTxBuffer, total_size);
+    // if (result == USBD_OK)
+    // {
+    //   HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
+    //   HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, 0);
+    // }
+    // else
+    // {
+    //   usbTxReady = 1;
+    //   HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, 1);
+    // }
+  }
 }
 /* USER CODE END 4 */
 
