@@ -1,0 +1,16 @@
+../Core/Src/main.c:152:5:main	1
+../Core/Src/main.c:249:6:SystemClock_Config	3
+../Core/Src/main.c:294:13:MX_CRC_Init	2
+../Core/Src/main.c:319:13:MX_I2S3_Init	2
+../Core/Src/main.c:352:13:MX_TIM4_Init	4
+../Core/Src/main.c:396:13:MX_USART2_UART_Init	2
+../Core/Src/main.c:426:13:MX_DMA_Init	1
+../Core/Src/main.c:443:13:MX_GPIO_Init	1
+../Core/Src/main.c:494:1:__io_putchar	1
+../Core/Src/main.c:501:6:HAL_I2S_RxHalfCpltCallback	1
+../Core/Src/main.c:509:6:HAL_I2S_RxCpltCallback	1
+../Core/Src/main.c:526:6:InitTask	1
+../Core/Src/main.c:557:6:AudioProcessTask	2
+../Core/Src/main.c:617:6:UsbTransmitTask	1
+../Core/Src/main.c:642:6:HAL_TIM_PeriodElapsedCallback	2
+../Core/Src/main.c:660:6:Error_Handler	1
