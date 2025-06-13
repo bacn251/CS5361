@@ -286,9 +286,6 @@ int main(void)
         Process_Audio_Data(audio_buffer_pong, AUDIO_BUFFER_SIZE);
       }
     }
-
-    // Chỉ check trạng thái USB, không g�?i SendAD7175DataOverUSB nữa
-    // CheckUSBStatus();
   }
   /* USER CODE END 3 */
 }
@@ -527,12 +524,6 @@ static void MX_GPIO_Init(void)
 // }
 void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-  /* First half of buffer is ready (ping buffer) */
-  memcpy(audio_buffer_ping, audio_buffer, AUDIO_BUFFER_SIZE * 2 * sizeof(uint16_t));
-  current_buffer = 0;
-  buffer_ready_flag = 1;
-
-  ////
   uint16_t left_index = 0;
   for (uint16_t i = 0; i < AUDIO_BUFFER_SIZE * 2; i += 4)
   {
@@ -544,11 +535,6 @@ void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 }
 void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-  /* Second half of buffer is ready (pong buffer) */
-  // memcpy(audio_buffer_pong, &audio_buffer[AUDIO_BUFFER_SIZE * 2],
-  //        AUDIO_BUFFER_SIZE * 2 * sizeof(uint16_t));
-  // current_buffer = 1;
-  // buffer_ready_flag = 1;
   uint16_t left_index = 0;
   uint16_t start_offset = AUDIO_BUFFER_SIZE * 2;
   for (uint16_t i = start_offset; i < start_offset + AUDIO_BUFFER_SIZE * 2; i += 4)
@@ -564,7 +550,7 @@ void Process_Audio_Data(uint16_t *buffer, uint16_t size)
   if (usbTxReady)
   {
     // Giới hạn kích thước gói tin để truy�?n hiệu quả
-    uint16_t sample_count = size > 192 ? 192 : size;
+    uint16_t sample_count = size;
     uint16_t total_size = sample_count * 3 + PACKET_HEADER_SIZE;
 
     // Thêm header gói tin
@@ -579,9 +565,9 @@ void Process_Audio_Data(uint16_t *buffer, uint16_t size)
       uint16_t left_high = buffer[i];
       uint16_t left_low = buffer[i + 1];
 
-      // Chuyển sang định dạng 24-bit
-      int32_t left_24bit = ((int32_t)left_high << 16) | left_low;
-      left_24bit = (left_24bit << 8) >> 8; // Sign extend
+      // Chuyển sang định dạng 24-bit (left_high&0xFF)|left_low
+      uint32_t left_24bit = (left_high << 16) | left_low;
+      // left_24bit = (left_24bit << 8) >> 8; // Sign extend
 
       // �?ặt dữ liệu vào buffer truy�?n
       uint32_t offset = PACKET_HEADER_SIZE + (offset_idx * 3);
