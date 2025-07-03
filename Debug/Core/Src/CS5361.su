@@ -1,0 +1,9 @@
+../Core/Src/CS5361.c:13:6:cs5361_set_mode	16	static
+../Core/Src/CS5361.c:27:6:cs5361_set_speed_mode	16	static
+../Core/Src/CS5361.c:47:6:cs5361_set_mdiv	16	static
+../Core/Src/CS5361.c:61:6:cs5361_set_hpf	16	static
+../Core/Src/CS5361.c:75:6:cs5361_set_sa	16	static
+../Core/Src/CS5361.c:89:6:cs5361_powerdown	8	static
+../Core/Src/CS5361.c:93:6:cs5361_powerup	8	static
+../Core/Src/CS5361.c:97:6:cs5361_init	8	static
+../Core/Src/CS5361.c:243:8:cs5361_start	8	static
