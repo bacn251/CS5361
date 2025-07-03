@@ -64,9 +64,9 @@ uint8_t buffer_ready = 1;
 volatile uint16_t Mic_DMA_PDM_Buffer0[INTERNAL_BUFF_SIZE];
 volatile uint16_t Mic_DMA_PDM_Buffer1[INTERNAL_BUFF_SIZE];
 // pack buffer
-#define FIFO_SIZE 	20089
+#define FIFO_SIZE 	25013
 #define USB_BUFFER_SIZE 2048
-uint32_t fifobuf[FIFO_SIZE];
+//uint32_t fifobuf[FIFO_SIZE];
 volatile uint16_t fifo_w_ptr = 0;
 volatile uint16_t fifo_r_ptr = 0;
 uint8_t fifo_read_enabled = 0;
@@ -202,10 +202,10 @@ void FifoWriteFromBuffer(uint16_t *buffer, uint16_t start, uint16_t end)
     uint32_t sample_24bit = ((uint32_t)left_high << 16) | left_low;
     sample_24bit = sample_24bit >> 8; // align to 24-bit MSB
 
-    uint8_t b1 = sample_24bit & 0xFF;         // LSB
-    uint8_t b2 = (sample_24bit >> 8) & 0xFF;  // MID
-    uint8_t b3 = (sample_24bit >> 16) & 0xFF; // MSB
-    FifoWriteSample(b1, b2, b3);
+//    uint8_t b1 = sample_24bit & 0xFF;         // LSB
+//    uint8_t b2 = (sample_24bit >> 8) & 0xFF;  // MID
+//    uint8_t b3 = (sample_24bit >> 16) & 0xFF; // MSB
+    FifoWriteSample((sample_24bit & 0xFF),((sample_24bit >> 8) & 0xFF),((sample_24bit >> 16) & 0xFF));
   }
 }
 

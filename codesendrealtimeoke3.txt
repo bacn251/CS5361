@@ -55,36 +55,27 @@ DMA_HandleTypeDef hdma_spi3_rx;
 TIM_HandleTypeDef htim4;
 
 /* USER CODE BEGIN PV */
-int16_t audiodata[64];
-uint32_t AudioRecInited = 0;
-int16_t RecBuf0[MIC_FILTER_RESULT_LENGTH];
-int16_t RecBuf1[MIC_FILTER_RESULT_LENGTH];
-uint8_t buffer_ready = 1;
-
-volatile uint16_t Mic_DMA_PDM_Buffer0[INTERNAL_BUFF_SIZE];
-volatile uint16_t Mic_DMA_PDM_Buffer1[INTERNAL_BUFF_SIZE];
 // pack buffer
-#define FIFO_SIZE 18383
+#define FIFO_SIZE 24000
 #define USB_BUFFER_SIZE 2048
-uint32_t fifobuf[FIFO_SIZE];
+// uint32_t fifobuf[FIFO_SIZE];
 volatile uint16_t fifo_w_ptr = 0;
 volatile uint16_t fifo_r_ptr = 0;
 uint8_t fifo_read_enabled = 0;
-static uint32_t fifo_overflow_count = 0;
-#define USB_PAYLOAD_SIZE 384
-uint8_t usbTxBuffer[USB_PAYLOAD_SIZE*3];
+#define USB_PAYLOAD_SIZE 768
+// uint8_t usbTxBuffer[USB_PAYLOAD_SIZE];
 volatile uint8_t usbTxReady = 1;
 #define PACKET_START_MARKER1 0xAA
 #define PACKET_START_MARKER2 0x55
 #define PACKET_HEADER_SIZE 4                                   // 2 start markers + 2 bytes length
-#define AUDIO_BUFFER_SIZE 1024                                   // sample
+#define AUDIO_BUFFER_SIZE 512                                  // sample
 #define AUDIO_CHANNELS 2                                       // left and right (2), left or right (1)
 #define SAMPLE_RATE 48000                                      // 48kHz sampling rate
 uint16_t audio_buffer[AUDIO_BUFFER_SIZE * AUDIO_CHANNELS * 2]; // x2 vì 24-bit = 2 x uint16_t
-uint16_t audio_buffer_ping[AUDIO_BUFFER_SIZE * 2];
-uint16_t audio_buffer_pong[AUDIO_BUFFER_SIZE * 2];
 volatile uint8_t buffer_ready_flag = 0;
-volatile uint8_t current_buffer = 0; // 0 = ping, 1 = pong
+volatile uint8_t dma_half_complete = 0;
+volatile uint8_t dma_full_complete = 0;
+
 typedef struct
 {
   uint8_t b[3]; // MSB, MID, LSB
@@ -106,14 +97,22 @@ static void MX_I2S3_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void Process_Audio_Data(uint16_t *buffer, uint16_t size);
-
+uint16_t FifoAvailable(void);
 void FifoWriteSample(uint8_t b1, uint8_t b2, uint8_t b3)
 {
   uint16_t next = (fifo_w_ptr + 1) % FIFO_SIZE;
-  if (next == fifo_r_ptr)
-  {
-    // FIFO đầy → bỏ sample cũ nhất
-    fifo_r_ptr = (fifo_r_ptr + 1) % FIFO_SIZE;
+  uint16_t buffer_usage = FifoAvailable();
+  uint16_t buffer_threshold = (FIFO_SIZE * 80) / 100; // 80% threshold
+
+  if (next == fifo_r_ptr) {
+    if (buffer_usage < buffer_threshold) {
+      // Buffer chưa quá đầy, bỏ qua sample mới
+    	 fifo_r_ptr = (fifo_r_ptr + 1) % FIFO_SIZE;
+
+    } else {
+      // Buffer quá đầy, ghi đè dữ liệu cũ nhất
+    	  return;
+    }
   }
 
   sample_fifo[fifo_w_ptr].b[0] = b1;
@@ -138,27 +137,31 @@ uint16_t FifoAvailable(void)
 
 void SendAD7175DataOverUSB(void)
 {
-  if (usbTxReady && FifoAvailable() >= (USB_PAYLOAD_SIZE / 3)) // 32 samples
+  // Tính toán số sample có thể gửi ngay lập tức
+  uint16_t available_samples = FifoAvailable();
+  if (!usbTxReady || available_samples == 0)
+    return;
+
+  // Gửi tối đa có thể trong 1 gói USB - tăng số lượng mẫu gửi đi
+  uint16_t samples_to_send = (available_samples > (USB_PAYLOAD_SIZE / 3))
+                                 ? (USB_PAYLOAD_SIZE / 3)
+                                 : available_samples;
+
+  static uint8_t usb_tx_buffer[USB_PAYLOAD_SIZE];  // Tránh tạo lại buffer mỗi lần
+
+  // Đóng gói dữ liệu hiệu quả hơn
+  for (uint16_t i = 0; i < samples_to_send; i++)
   {
-    uint8_t usb_tx_buffer[USB_PAYLOAD_SIZE + PACKET_HEADER_SIZE];
-
-    usb_tx_buffer[0] = 0xAA; // PACKET_START_MARKER1
-    usb_tx_buffer[1] = 0x55; // PACKET_START_MARKER2
-    usb_tx_buffer[2] = (USB_PAYLOAD_SIZE >> 8) & 0xFF;
-    usb_tx_buffer[3] = USB_PAYLOAD_SIZE & 0xFF;
-
-    for (uint16_t i = 0; i < (USB_PAYLOAD_SIZE / 3); i++) // 32 sample
-    {
-      Sample_t s;
-      FifoReadSample(&s);
-      usb_tx_buffer[PACKET_HEADER_SIZE + i * 3 + 0] = s.b[0];
-      usb_tx_buffer[PACKET_HEADER_SIZE + i * 3 + 1] = s.b[1];
-      usb_tx_buffer[PACKET_HEADER_SIZE + i * 3 + 2] = s.b[2];
-    }
-
-    usbTxReady = 0;
-    CDC_Transmit_FS(usb_tx_buffer, USB_PAYLOAD_SIZE + PACKET_HEADER_SIZE);
+    Sample_t s;
+    FifoReadSample(&s);
+    usb_tx_buffer[i*3]   = s.b[0];
+    usb_tx_buffer[i*3+1] = s.b[1];
+    usb_tx_buffer[i*3+2] = s.b[2];
   }
+
+  // Gửi chính xác số byte cần thiết
+  usbTxReady = 0;
+  CDC_Transmit_FS(usb_tx_buffer, samples_to_send * 3);
 }
 void CheckUSBStatus(void)
 {
@@ -204,10 +207,10 @@ void FifoWriteFromBuffer(uint16_t *buffer, uint16_t start, uint16_t end)
     uint32_t sample_24bit = ((uint32_t)left_high << 16) | left_low;
     sample_24bit = sample_24bit >> 8; // align to 24-bit MSB
 
-    uint8_t b1 = sample_24bit & 0xFF;         // LSB
-    uint8_t b2 = (sample_24bit >> 8) & 0xFF;  // MID
-    uint8_t b3 = (sample_24bit >> 16) & 0xFF; // MSB
-    FifoWriteSample(b1, b2, b3);
+//    uint8_t b1 = sample_24bit & 0xFF;         // LSB
+//    uint8_t b2 = (sample_24bit >> 8) & 0xFF;  // MID
+//    uint8_t b3 = (sample_24bit >> 16) & 0xFF; // MSB
+    FifoWriteSample((sample_24bit & 0xFF),((sample_24bit >> 8) & 0xFF),((sample_24bit >> 16) & 0xFF));
   }
 }
 
@@ -273,23 +276,23 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-    if(buffer_ready_flag)
+    if (dma_half_complete)
     {
-      buffer_ready_flag = 0;
-
-      if (current_buffer == 0)
-      {
-        FifoWriteFromBuffer(audio_buffer, 0, AUDIO_BUFFER_SIZE * 2);
-      }
-      else if (current_buffer == 1)
-      {
-        FifoWriteFromBuffer(audio_buffer, AUDIO_BUFFER_SIZE * 2, AUDIO_BUFFER_SIZE * 4);
-      }
+      dma_half_complete = 0;
+      FifoWriteFromBuffer(audio_buffer, 0, AUDIO_BUFFER_SIZE * 2);
+      SendAD7175DataOverUSB();  // Gửi ngay sau khi xử lý
     }
 
+    if (dma_full_complete)
+    {
+      dma_full_complete = 0;
+      FifoWriteFromBuffer(audio_buffer, AUDIO_BUFFER_SIZE * 2, AUDIO_BUFFER_SIZE * 4);
+      SendAD7175DataOverUSB();  // Gửi ngay sau khi xử lý
+    }
+
+    // Kiểm tra liên tục để gửi dữ liệu khi USB sẵn sàng
     SendAD7175DataOverUSB();
-    CheckUSBStatus();
+ //   CheckUSBStatus();  // Đảm bảo USB không bị treo
   }
   /* USER CODE END 3 */
 }
@@ -521,19 +524,17 @@ static void MX_GPIO_Init(void)
 // }
 void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-  current_buffer = 0;
-  buffer_ready_flag = 1;
+  dma_half_complete = 1;
 }
 void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-  current_buffer = 1;
-  buffer_ready_flag = 1;
+  dma_full_complete = 1;
 }
 // void Process_Audio_Data(uint16_t *buffer, uint16_t size)
 // {
 //   if (usbTxReady)
 //   {
-//     // Giới hạn kích thước gói tin để truy�?n hiệu quả
+//     // Giới hạn kích thước gói tin để truyền hiệu quả
 //     uint16_t sample_count = size;
 //     uint16_t total_size = sample_count * 3 + PACKET_HEADER_SIZE;
 
@@ -553,7 +554,7 @@ void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
 //       uint32_t left_24bit = (left_high << 16) | left_low;
 //       // left_24bit = (left_24bit << 8) >> 8; // Sign extend
 
-//       // �?ặt dữ liệu vào buffer truy�?n
+//       // Đặt dữ liệu vào buffer truyền
 //       uint32_t offset = PACKET_HEADER_SIZE + (offset_idx * 3);
 //       usbTxBuffer[offset] = left_24bit & 0xFF;
 //       usbTxBuffer[offset + 1] = (left_24bit >> 8) & 0xFF;
