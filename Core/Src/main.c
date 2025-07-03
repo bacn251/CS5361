@@ -136,13 +136,16 @@ void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
       int16_t *usb_buf = haudio->in_buffer;
       
       // Chỉ lấy kênh trái (L) từ CS5361
-      for (uint16_t i = 0; i < (AUDIO_IN_PACKET / 2); i++)
+      uint16_t start = 0;
+      uint16_t end = (AUDIO_IN_PACKET / 2);
+      for (uint16_t i = start; i < end; i += 4)
       {
-        // Lấy mẫu từ kênh trái (index chẵn)
-        int32_t sample = adc_buffer[i*2];
+        // I2S từ CS5361 có định dạng 24-bit: [LH LL RH RL]
+        // LH = Left High (bit 23-16), LL = Left Low (bit 15-8), RH = Right High (bit 23-16), RL = Right Low (bit 15-8)
+        int32_t left_sample = ((int32_t)adc_buffer[i*2] << 8) | ((int32_t)adc_buffer[i*2+1] >> 8);
         
-        // Chuyển đổi từ 24-bit sang 16-bit và khuếch đại
-        usb_buf[i] = (int16_t)((sample >> 8) * volume_gain);
+        // Chỉ sử dụng 16 bit trên cùng (MSB) của kênh trái và áp dụng khuếch đại
+        usb_buf[i] = (int16_t)((left_sample >> 8) * volume_gain);
       }
     }
   }
@@ -167,13 +170,17 @@ void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
       int16_t *usb_buf = haudio->in_buffer + (AUDIO_IN_PACKET / 2);
       
       // Chỉ lấy kênh trái (L) từ CS5361
-      for (uint16_t i = 0; i < (AUDIO_IN_PACKET / 2); i++)
+      uint16_t start = 0;
+      uint16_t end = (AUDIO_IN_PACKET / 2);
+      for (uint16_t i = start; i < end; i += 4)
       {
-        // Lấy mẫu từ kênh trái (index chẵn) trong nửa sau của buffer DMA
-        int32_t sample = adc_buffer[(i + (AUDIO_IN_PACKET / 2))*2];
+        // I2S từ CS5361 có định dạng 24-bit: [LH LL RH RL]
+        // LH = Left High (bit 23-16), LL = Left Low (bit 15-8), RH = Right High (bit 23-16), RL = Right Low (bit 15-8)
+        int32_t left_sample = ((int32_t)adc_buffer[(i + (AUDIO_IN_PACKET / 2))*2] << 8) | 
+                             ((int32_t)adc_buffer[(i + (AUDIO_IN_PACKET / 2))*2+1] >> 8);
         
-        // Chuyển đổi từ 24-bit sang 16-bit và khuếch đại
-        usb_buf[i] = (int16_t)((sample >> 8) * volume_gain);
+        // Chỉ sử dụng 16 bit trên cùng (MSB) của kênh trái và áp dụng khuếch đại
+        usb_buf[i] = (int16_t)((left_sample >> 8) * volume_gain);
       }
       
       // Gửi toàn bộ buffer qua USB
