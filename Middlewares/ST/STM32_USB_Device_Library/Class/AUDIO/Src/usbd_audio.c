@@ -567,7 +567,7 @@ static uint8_t USBD_AUDIO_DataIn(USBD_HandleTypeDef *pdev, uint8_t epnum)
   {
     // Đảo trạng thái buffer half để xác định phần buffer nào sẽ được gửi tiếp theo
     haudio->in_buffer_half = !haudio->in_buffer_half;
-    
+
     // Tính offset cho buffer trước đó
     uint16_t prev = (AUDIO_IN_PACKET / 2) * !haudio->in_buffer_half;
 
