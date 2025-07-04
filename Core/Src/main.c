@@ -62,7 +62,7 @@ extern USBD_HandleTypeDef hUsbDeviceFS;
 int32_t adc_buffer[AUDIO_IN_PACKET] = {0};
 
 // Hệ số khuếch đại cho tín hiệu âm thanh
-uint8_t volume_gain = 6; // Khuếch đại mặc định là 6 lần
+uint8_t volume_gain = 4; // Khuếch đại mặc định là 4 lần
 
 // Biến theo dõi trạng thái
 volatile uint8_t i2s_active = 0;
@@ -132,20 +132,27 @@ void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
     USBD_AUDIO_HandleTypeDef *haudio = (USBD_AUDIO_HandleTypeDef*)hUsbDeviceFS.pClassData;
     if (haudio != NULL && usb_active)
     {
-      // Xử lý nửa đầu của buffer DMA
-      int16_t *usb_buf = haudio->in_buffer;
+      // Xác định phần buffer cần xử lý
+      int16_t *buf_part = haudio->in_buffer;
       
-      // Chỉ lấy kênh trái (L) từ CS5361
-      uint16_t start = 0;
-      uint16_t end = (AUDIO_IN_PACKET / 2);
-      for (uint16_t i = start; i < end; i += 4)
+      // Xử lý dữ liệu từ CS5361 (24-bit) sang USB Audio (16-bit)
+      // CS5361 gửi dữ liệu theo định dạng I2S, mỗi frame gồm 2 kênh (L+R)
+      // Chúng ta chỉ lấy kênh trái (Left)
+      for (uint16_t i = 0; i < (AUDIO_IN_PACKET / 2); i++)
       {
-        // I2S từ CS5361 có định dạng 24-bit: [LH LL RH RL]
-        // LH = Left High (bit 23-16), LL = Left Low (bit 15-8), RH = Right High (bit 23-16), RL = Right Low (bit 15-8)
-        int32_t left_sample = ((int32_t)adc_buffer[i*2] << 8) | ((int32_t)adc_buffer[i*2+1] >> 8);
+        // Lấy mẫu từ kênh trái (chẵn) từ buffer DMA
+        int32_t sample = adc_buffer[i*2]; // Chỉ lấy kênh trái (index chẵn)
         
-        // Chỉ sử dụng 16 bit trên cùng (MSB) của kênh trái và áp dụng khuếch đại
-        usb_buf[i] = (int16_t)((left_sample >> 8) * volume_gain);
+        // Chuyển đổi từ 24-bit sang 16-bit và khuếch đại
+        // CS5361 trả về dữ liệu 24-bit được căn lề trái trong int32_t
+        buf_part[i] = (int16_t)((sample >> 8) * volume_gain);
+      }
+      
+      // Nếu buffer đã sẵn sàng và đây là nửa đầu tiên, bắt đầu truyền USB
+      if (!haudio->in_buffer_half)
+      {
+        haudio->in_buffer_half = 1;
+        USBD_LL_Transmit(&hUsbDeviceFS, AUDIO_IN_EP, (uint8_t*)haudio->in_buffer, AUDIO_IN_PACKET);
       }
     }
   }
@@ -166,25 +173,26 @@ void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
     USBD_AUDIO_HandleTypeDef *haudio = (USBD_AUDIO_HandleTypeDef*)hUsbDeviceFS.pClassData;
     if (haudio != NULL && usb_active)
     {
-      // Xử lý nửa sau của buffer DMA
-      int16_t *usb_buf = haudio->in_buffer + (AUDIO_IN_PACKET / 2);
+      // Xác định phần buffer cần xử lý
+      int16_t *buf_part = haudio->in_buffer + (AUDIO_IN_PACKET / 2);
       
-      // Chỉ lấy kênh trái (L) từ CS5361
-      uint16_t start = 0;
-      uint16_t end = (AUDIO_IN_PACKET / 2);
-      for (uint16_t i = start; i < end; i += 4)
+      // Xử lý dữ liệu từ CS5361 (24-bit) sang USB Audio (16-bit)
+      // Chỉ lấy kênh trái
+      for (uint16_t i = 0; i < (AUDIO_IN_PACKET / 2); i++)
       {
-        // I2S từ CS5361 có định dạng 24-bit: [LH LL RH RL]
-        // LH = Left High (bit 23-16), LL = Left Low (bit 15-8), RH = Right High (bit 23-16), RL = Right Low (bit 15-8)
-        int32_t left_sample = ((int32_t)adc_buffer[(i + (AUDIO_IN_PACKET / 2))*2] << 8) | 
-                             ((int32_t)adc_buffer[(i + (AUDIO_IN_PACKET / 2))*2+1] >> 8);
+        // Lấy mẫu từ kênh trái (chẵn) từ nửa sau của buffer DMA
+        int32_t sample = adc_buffer[(i + (AUDIO_IN_PACKET / 2))*2]; // Chỉ lấy kênh trái
         
-        // Chỉ sử dụng 16 bit trên cùng (MSB) của kênh trái và áp dụng khuếch đại
-        usb_buf[i] = (int16_t)((left_sample >> 8) * volume_gain);
+        // Chuyển đổi từ 24-bit sang 16-bit và khuếch đại
+        buf_part[i] = (int16_t)((sample >> 8) * volume_gain);
       }
       
-      // Gửi toàn bộ buffer qua USB
-      USBD_LL_Transmit(&hUsbDeviceFS, AUDIO_IN_EP, (uint8_t*)haudio->in_buffer, AUDIO_IN_PACKET);
+      // Nếu buffer đã sẵn sàng và đây là nửa thứ hai, bắt đầu truyền USB
+      if (haudio->in_buffer_half)
+      {
+        haudio->in_buffer_half = 0;
+        USBD_LL_Transmit(&hUsbDeviceFS, AUDIO_IN_EP, (uint8_t*)haudio->in_buffer, AUDIO_IN_PACKET);
+      }
     }
   }
 }
@@ -239,15 +247,26 @@ int main(void)
   MX_I2S3_Init();
   /* USER CODE BEGIN 2 */
   // Tắt tất cả đèn LED
-  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET); // Đèn xanh
+  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET); // Đèn xanh lá
+  HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET); // Đèn đỏ
+  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET); // Đèn màu xanh dương
 
+  // Khởi động tuần tự LED để kiểm tra
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+  HAL_Delay(200);
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
+  HAL_Delay(200);
+  HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET);
+  
   // Khởi tạo CS5361
   cs5361_init();
   HAL_Delay(50);
-
+  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
+  HAL_Delay(200);
+  HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
+  
   // Chờ USB khởi tạo
   uint32_t usb_timeout = HAL_GetTick() + 3000; // 3 second timeout
   while (!USB_Audio_Ready() && HAL_GetTick() < usb_timeout)
@@ -255,7 +274,7 @@ int main(void)
     HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
     HAL_Delay(100);
   }
-
+  
   if (USB_Audio_Ready())
   {
     // USB đã sẵn sàng, bắt đầu nhận dữ liệu từ CS5361
@@ -313,18 +332,24 @@ int main(void)
         // Tính mức tín hiệu trung bình
         for (int i = 0; i < 10; i++)
         {
-          signal_level += abs(adc_buffer[i*2]);
+          signal_level += abs(adc_buffer[i*2]); // Chỉ kiểm tra kênh trái
         }
         signal_level /= 10;
         
-        // Điều chỉnh khuếch đại tự động
+        // Nếu tín hiệu quá nhỏ, tăng bộ đếm im lặng
         if (signal_level < 1000)
         {
           silent_count++;
-          if (silent_count > 5 && volume_gain < 10)
+          if (silent_count > 5)
           {
-            volume_gain++;
+            // Tăng khuếch đại nếu tín hiệu quá nhỏ trong thời gian dài
+            if (volume_gain < 10)
+            {
+              volume_gain++;
+            }
             silent_count = 0;
+            
+            // Báo hiệu đã điều chỉnh khuếch đại
             HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
             HAL_Delay(50);
             HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET);
@@ -333,14 +358,23 @@ int main(void)
         else
         {
           silent_count = 0;
+          
+          // Nếu tín hiệu quá lớn, giảm khuếch đại để tránh biến dạng
           if (signal_level > 20000 && volume_gain > 1)
           {
             volume_gain--;
+            
+            // Báo hiệu đã điều chỉnh khuếch đại
             HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
             HAL_Delay(50);
             HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
           }
         }
+      }
+      else
+      {
+        // USB không sẵn sàng, báo hiệu
+        HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
       }
     }
   }
