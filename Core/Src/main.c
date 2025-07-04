@@ -141,16 +141,12 @@ void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
       for (uint16_t i = 0; i < (AUDIO_IN_PACKET / 2); i++)
       {
         // Lấy mẫu từ kênh trái từ buffer DMA
-        int32_t sample = adc_buffer[i * 2]; // Chỉ lấy kênh trái (index chẵn)
+        int16_t left_high = adc_buffer[i * 2];
+        int16_t left_low = adc_buffer[i * 2 + 1];
+        int32_t sample = left_high << 16 | left_low; // Ghép 2 word thành dữ liệu 24-bit
         
-        // Khuếch đại tín hiệu
-        sample = sample ;
-        
-        // // Giới hạn giá trị trong phạm vi 24-bit
-        // if (sample > 8388607)
-        //   sample = 8388607; // 2^23 - 1
-        // if (sample < -8388608)
-        //   sample = -8388608; // -2^23
+        // Dịch bit để lấy đúng 24 bit từ CS5361
+        sample = (sample >> 8);
         
         // Lưu vào buffer dưới dạng 24-bit (3 byte) - định dạng little-endian (LSB first)
         buf_part[i * 3] = sample & 0xFF;           // Byte thấp nhất
@@ -192,16 +188,12 @@ void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
       for (uint16_t i = 0; i < (AUDIO_IN_PACKET / 2); i++)
       {
         // Lấy mẫu từ kênh trái từ nửa sau của buffer DMA
-        int32_t sample = adc_buffer[(i + (AUDIO_IN_PACKET / 2)) * 2]; // Chỉ lấy kênh trái
+        int16_t left_high = adc_buffer[(i + (AUDIO_IN_PACKET / 2)) * 2];
+        int16_t left_low = adc_buffer[(i + (AUDIO_IN_PACKET / 2)) * 2 + 1];
+        int32_t sample = left_high << 16 | left_low; // Ghép 2 word thành dữ liệu 24-bit
         
-        // Khuếch đại tín hiệu
-        sample = sample ;
-        
-        // Giới hạn giá trị trong phạm vi 24-bit
-        // if (sample > 8388607)
-        //   sample = 8388607; // 2^23 - 1
-        // if (sample < -8388608)
-        //   sample = -8388608; // -2^23
+        // Dịch bit để lấy đúng 24 bit từ CS5361
+        sample = (sample >> 8);
         
         // Lưu vào buffer dưới dạng 24-bit (3 byte) - định dạng little-endian (LSB first)
         buf_part[i * 3] = sample & 0xFF;           // Byte thấp nhất
@@ -275,23 +267,18 @@ int main(void)
   HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET); // Đèn đỏ
   HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET); // Đèn màu xanh dương
 
-  // Khởi động tuần tự LED để kiểm tra
   HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
   HAL_Delay(200);
   HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_SET);
   HAL_Delay(200);
   HAL_GPIO_WritePin(LD4_GPIO_Port, LD4_Pin, GPIO_PIN_RESET);
-
-  // Khởi tạo CS5361
   cs5361_init();
   HAL_Delay(50);
   HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
   HAL_Delay(200);
   HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
-
-  // Chờ USB khởi tạo
-  uint32_t usb_timeout = HAL_GetTick() + 3000; // 3 second timeout
+  uint32_t usb_timeout = HAL_GetTick() + 3000; 
   while (!USB_Audio_Ready() && HAL_GetTick() < usb_timeout)
   {
     HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
@@ -300,7 +287,6 @@ int main(void)
 
   if (USB_Audio_Ready())
   {
-    // USB đã sẵn sàng, bắt đầu nhận dữ liệu từ CS5361
     HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
     HAL_Delay(200);
     HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET);
@@ -308,7 +294,6 @@ int main(void)
   }
   else
   {
-    // USB chưa sẵn sàng, báo lỗi
     for (int i = 0; i < 5; i++)
     {
       HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
