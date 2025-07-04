@@ -94,8 +94,8 @@ EndBSPDependencies */
 #define AUDIO_PACKET_SZE(frq) (uint8_t)(((frq * 2U * 2U) / 1000U) & 0xFFU), \
                               (uint8_t)((((frq * 2U * 2U) / 1000U) >> 8) & 0xFFU)
 /* USER CODE BEGIN */
-#define MIC_PACKET_SZE(frq) (uint8_t)(((frq * 1U * 2U) / 1000U) & 0xFFU), \
-                            (uint8_t)((((frq * 1U * 2U) / 1000U) >> 8) & 0xFFU)
+#define MIC_PACKET_SZE(frq) (uint8_t)(((frq * 1U * 3U) / 1000U) & 0xFFU), \
+                            (uint8_t)((((frq * 1U * 3U) / 1000U) >> 8) & 0xFFU)
 void I2S_TO_CS5361(void);
 
 /**
@@ -288,8 +288,8 @@ __ALIGN_BEGIN static uint8_t USBD_AUDIO_CfgDesc[USB_AUDIO_CONFIG_DESC_SIZ] __ALI
         AUDIO_STREAMING_FORMAT_TYPE,        /* bDescriptorSubtype */
         AUDIO_FORMAT_TYPE_I,                /* bFormatType */
         0x01,                               // 0x02,                                 /* bNrChannels */
-        0x02,                               /* bSubFrameSize :  2 Bytes per frame (16bits) */
-        16,                                 /* bBitResolution (16-bits per sample) */
+        0x03,                               /* bSubFrameSize :  2 Bytes per frame (16bits) */
+        24,                                 /* bBitResolution (16-bits per sample) */
         0x01,                               /* bSamFreqType only one frequency supported */
         AUDIO_SAMPLE_FREQ(USBD_AUDIO_FREQ), /* Audio sampling frequency coded on 3 bytes */
         /* 11 byte*/
@@ -581,7 +581,6 @@ static uint8_t USBD_AUDIO_DataIn(USBD_HandleTypeDef *pdev, uint8_t epnum)
 
   return (uint8_t)USBD_OK;
 }
-
 /**
  * @brief  USBD_AUDIO_EP0_RxReady
  *         handle EP0 Rx Ready event

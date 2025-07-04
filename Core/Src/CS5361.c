@@ -97,7 +97,7 @@ void cs5361_powerup(void)
 void cs5361_init(void)
 {
   cs5361_set_mode(CS5361_SLAVE_MODE);
-  cs5361_set_speed_mode(CS5361_SINGLE_SPEED); //CS5361_SINGLE_SPEED  //CS5361_QUAD_SPEED 96khz
+  cs5361_set_speed_mode(CS5361_QUAD_SPEED); //CS5361_SINGLE_SPEED  //CS5361_QUAD_SPEED 96khz
   cs5361_set_mdiv(CS5361_MDIV_2);
   cs5361_set_hpf(CS5361_HPF_ENABLE);
   cs5361_set_sa(CS5361_I2S_MODE);

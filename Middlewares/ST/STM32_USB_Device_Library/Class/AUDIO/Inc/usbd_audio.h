@@ -106,7 +106,7 @@ extern "C" {
 
 
 #define AUDIO_OUT_PACKET                              (uint16_t)(((USBD_AUDIO_FREQ * 2U * 2U) / 1000U))
-#define AUDIO_IN_PACKET                               (uint16_t)(((USBD_AUDIO_FREQ * 1U * 2U) / 1000U))
+#define AUDIO_IN_PACKET                               (uint16_t)(((USBD_AUDIO_FREQ * 1U * 3U) / 1000U))
 #define AUDIO_DEFAULT_VOLUME                          70U
 
 /* Number of sub-packets in the audio transfer buffer. You can modify this value but always make sure
@@ -157,7 +157,7 @@ typedef struct
   uint16_t rd_ptr;
   uint16_t wr_ptr;
   /* mic */
-  int16_t in_buffer[AUDIO_IN_PACKET];
+  uint8_t in_buffer[AUDIO_IN_PACKET];
   uint8_t in_buffer_half;
   /* control */
   USBD_AUDIO_ControlTypeDef control;
