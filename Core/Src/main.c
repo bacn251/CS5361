@@ -100,21 +100,6 @@ static void MX_I2S3_Init(void);
  */
 void I2S_TO_CS5361(void)
 {
-  // // Đèn báo bắt đầu truyền dữ liệu
-  // HAL_GPIO_TogglePin(LD6_GPIO_Port, LD6_Pin);
-
-  // // Đánh dấu I2S đang hoạt động
-  // i2s_active = 1;
-  // last_i2s_activity = HAL_GetTick();
-
-  // // Bắt đầu nhận dữ liệu qua DMA
-  // HAL_StatusTypeDef status = HAL_I2S_Receive_DMA(&hi2s3, (uint16_t *)adc_buffer, AUDIO_IN_PACKET * 2);
-  // if (status != HAL_OK)
-  // {
-  //   // Báo lỗi nếu không khởi tạo được DMA
-  //   HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
-  //   i2s_active = 0;
-  // }
   HAL_I2S_Receive_DMA(&hi2s3, (uint16_t *)adc_buffer, AUDIO_IN_PACKET * 2);
 }
 
@@ -131,15 +116,16 @@ void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
     if (haudio != NULL)
     {
       uint8_t *buf_part = haudio->in_buffer;
-      for (uint16_t i = 0; i < (AUDIO_IN_PACKET / 2); i++)
+      for (uint16_t i = 0; i < (AUDIO_IN_PACKET/2); i+=4)
       {
         int16_t left_high = adc_buffer[i * 2];
         int16_t left_low = adc_buffer[i * 2 + 1];
         int32_t sample = left_high << 16 | left_low;
         sample = (sample >> 8);
-        buf_part[i * 3] = sample & 0xFF;
-        buf_part[i * 3 + 1] = (sample >> 8) & 0xFF;
-        buf_part[i * 3 + 2] = (sample >> 16) & 0xFF;
+        int j = i/4;
+        buf_part[j * 3] = sample & 0xFF;
+        buf_part[j * 3 + 1] = (sample >> 8) & 0xFF;
+        buf_part[j * 3 + 2] = (sample >> 16) & 0xFF;
       }
       if (!haudio->in_buffer_half)
       {
@@ -163,16 +149,17 @@ void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
     USBD_AUDIO_HandleTypeDef *haudio = (USBD_AUDIO_HandleTypeDef *)hUsbDeviceFS.pClassData;
     if (haudio != NULL)
     {
-      uint8_t *buf_part = haudio->in_buffer + (AUDIO_IN_PACKET / 2);
-      for (uint16_t i = 0; i < (AUDIO_IN_PACKET / 2); i++)
+      uint8_t *buf_part = haudio->in_buffer + (AUDIO_IN_PACKET );
+      for (uint16_t i = 0; i < (AUDIO_IN_PACKET/2); i+=4)
       {
         int16_t left_high = adc_buffer[(i + (AUDIO_IN_PACKET / 2)) * 2];
         int16_t left_low = adc_buffer[(i + (AUDIO_IN_PACKET / 2)) * 2 + 1];
         int32_t sample = left_high << 16 | left_low;
         sample = (sample >> 8);
-        buf_part[i * 3] = sample & 0xFF;
-        buf_part[i * 3 + 1] = (sample >> 8) & 0xFF;
-        buf_part[i * 3 + 2] = (sample >> 16) & 0xFF;
+        int j = i/4;
+        buf_part[j * 3] = sample & 0xFF;
+        buf_part[j * 3 + 1] = (sample >> 8) & 0xFF;
+        buf_part[j * 3 + 2] = (sample >> 16) & 0xFF;
       }
       if (haudio->in_buffer_half)
       {
@@ -249,32 +236,7 @@ int main(void)
   HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
   HAL_Delay(200);
   HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
-  // I2S_TO_CS5361();
-  // uint32_t usb_timeout = HAL_GetTick() + 3000;
-  // while (!USB_Audio_Ready() && HAL_GetTick() < usb_timeout)
-  // {
-  //   HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
-  //   HAL_Delay(100);
-  // }
-
-  // if (USB_Audio_Ready())
-  // {
-  //   HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
-  //   HAL_Delay(200);
-  //   HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET);
-  //   I2S_TO_CS5361();
-  // }
-  // else
-  // {
-  //   for (int i = 0; i < 5; i++)
-  //   {
-  //     HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_SET);
-  //     HAL_Delay(100);
-  //     HAL_GPIO_WritePin(LD5_GPIO_Port, LD5_Pin, GPIO_PIN_RESET);
-  //     HAL_Delay(100);
-  //   }
-  // }
-  // HAL_I2S_Receive_DMA(&hi2s3, (uint16_t *)adc_buffer, AUDIO_IN_PACKET * 2);
+  I2S_TO_CS5361();
   /* USER CODE END 2 */
 
   /* Infinite loop */
